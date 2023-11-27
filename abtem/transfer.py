@@ -328,12 +328,12 @@ class CTF(HasAcceleratorMixin, HasEventMixin):
 
     def cartesian_coordinates(self, alpha: np.ndarray, phi: np.ndarray) -> (np.ndarray, np.ndarray):
         """Calculate a Cartesian grid for a given polar grid
-        alpha:rad, 2d array, phi:rad, 2d array
+        alpha:A-1, 2d array, phi:rad, 2d array
         returns:
         u,v: 2d array, A-1
         """
-        u = alpha * np.cos(phi) / self.wavelength
-        v = alpha * np.sin(phi) / self.wavelength
+        u = alpha * np.cos(phi)
+        v = alpha * np.sin(phi)
         return u, v
 
     def evaluate_chi(self, alpha: Union[float, np.ndarray], phi: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
@@ -341,11 +341,12 @@ class CTF(HasAcceleratorMixin, HasEventMixin):
 
         parameters = self.parameters
 
-        alpha2 = alpha ** 2
         alpha = xp.array(alpha)
+        phi = xp.array(phi)
 
         # transfer alpha(rad) and phi(rad) into u(A-1), v(A-1)
         u, v = self.cartesian_coordinates(alpha, phi)
+
         array = xp.zeros(u.shape, dtype=np.float32)
 
         if any([parameters[symbol] != 0. for symbol in ('C10', 'C12a', 'C12b')]):

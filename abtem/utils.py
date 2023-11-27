@@ -96,7 +96,12 @@ def spatial_frequencies(gpts: Tuple[int, int], sampling: Tuple[float, float]):
 
 
 def polar_coordinates(x, y):
-    """Calculate a polar grid for a given Cartesian grid."""
+    """
+    Calculate a polar grid for a given Cartesian grid.
+    x, y in A-1
+    alpha in A-1
+    phi in rad
+    """
     xp = get_array_module(x)
     alpha = xp.sqrt(x.reshape((-1, 1)) ** 2 + y.reshape((1, -1)) ** 2)
     phi = xp.arctan2(x.reshape((-1, 1)), y.reshape((1, -1)))
