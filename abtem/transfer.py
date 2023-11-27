@@ -16,6 +16,12 @@ polar_symbols = ('C10', 'C12', 'phi12',
                  'C41', 'phi41', 'C43', 'phi43', 'C45', 'phi45',
                  'C50', 'C52', 'phi52', 'C54', 'phi54', 'C56', 'phi56')
 
+cartesian_symbols = ('C10', 'C12a', 'C12b',
+                     'C21a', 'C21b', 'C23a', 'C23b',
+                     'C30', 'C32a', 'C32b', 'C34a', 'C34b',
+                     'C41a', 'C41b', 'C43a', 'C43b', 'C45a', 'C45b',
+                     'C50', 'C52a', 'C52b', 'C54a', 'C54b', 'C56a', 'C56b')
+
 #: Aliases for the most commonly used optical aberrations.
 polar_aliases = {'defocus': 'C10', 'astigmatism': 'C12', 'astigmatism_angle': 'phi12',
                  'coma': 'C21', 'coma_angle': 'phi21',
@@ -76,7 +82,8 @@ class CTF(HasAcceleratorMixin, HasEventMixin):
                  **kwargs):
 
         for key in kwargs.keys():
-            if (key not in polar_symbols) and (key not in polar_aliases.keys()):
+            if (key not in polar_symbols) and (key not in polar_aliases.keys()) and (key not in cartesian_symbols):
+                print(key)
                 raise ValueError('{} not a recognized parameter'.format(key))
 
         self._event = Event()
@@ -90,7 +97,7 @@ class CTF(HasAcceleratorMixin, HasEventMixin):
         self._angular_spread = angular_spread
         self._gaussian_spread = gaussian_spread
 
-        self._parameters = dict(zip(polar_symbols, [0.] * len(polar_symbols)))
+        self._parameters = dict(zip(cartesian_symbols, [0.] * len(cartesian_symbols)))
 
         self._aperture = aperture
 
@@ -115,7 +122,7 @@ class CTF(HasAcceleratorMixin, HasEventMixin):
 
             return property(getter, setter)
 
-        for symbol in polar_symbols:
+        for symbol in cartesian_symbols:
             setattr(self.__class__, symbol, parametrization_property(symbol))
 
         for key, value in polar_aliases.items():
@@ -279,7 +286,7 @@ class CTF(HasAcceleratorMixin, HasEventMixin):
         return xp.exp(-xp.sign(self.angular_spread) * (self.angular_spread / 2 / 1000) ** 2 *
                       (dchi_dk ** 2 + dchi_dphi ** 2))
 
-    def evaluate_chi(self, alpha: Union[float, np.ndarray], phi: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+    def polar_evaluate_chi(self, alpha: Union[float, np.ndarray], phi: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
         xp = get_array_module(alpha)
         p = self.parameters
 
@@ -317,6 +324,64 @@ class CTF(HasAcceleratorMixin, HasEventMixin):
                        p['C56'] * xp.cos(6 * (phi - p['phi56']))))
 
         array = 2 * xp.pi / self.wavelength * array
+        return array
+
+    def cartesian_coordinates(self, alpha: np.ndarray, phi: np.ndarray) -> (np.ndarray, np.ndarray):
+        """Calculate a Cartesian grid for a given polar grid
+        alpha:rad, 2d array, phi:rad, 2d array
+        returns:
+        u,v: 2d array, A-1
+        """
+        u = alpha * np.cos(phi) / self.wavelength
+        v = alpha * np.sin(phi) / self.wavelength
+        return u, v
+
+    def evaluate_chi(self, alpha: Union[float, np.ndarray], phi: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+        xp = get_array_module(alpha)
+
+        parameters = self.parameters
+
+        alpha2 = alpha ** 2
+        alpha = xp.array(alpha)
+
+        # transfer alpha(rad) and phi(rad) into u(A-1), v(A-1)
+        u, v = self.cartesian_coordinates(alpha, phi)
+        array = xp.zeros(u.shape, dtype=np.float32)
+
+        if any([parameters[symbol] != 0. for symbol in ('C10', 'C12a', 'C12b')]):
+            array = array + 1 / 2 * (parameters["C10"] * (u ** 2 + v ** 2)
+                                     + parameters["C12a"] * (u ** 2 - v ** 2)
+                                     + 2 * parameters["C12b"] * u * v
+                                     )
+
+        if any([parameters[symbol] != 0. for symbol in ("C21a", "C21b", "C23a", "C23b")]):
+            array = array + 1 / 3 * (parameters["C21a"] * (u ** 2 * u + u * v ** 2)
+                                     + parameters["C21b"] * (v ** 2 * v + v * u ** 2)
+                                     + parameters["C23a"] * (u ** 2 * u - 3 * u * v ** 2)
+                                     + parameters["C23b"] * (- v ** 2 * v + 3 * v * u ** 2)
+                                     )
+
+        if any([parameters[symbol] != 0. for symbol in ("C30", "C32a", "C32b", "C34a", "C34b")]):
+            array = array + 1 / 4 * (parameters["C30"] * (u ** 4 + 2 * v ** 2 * u ** 2 + v ** 4)
+                                     + parameters["C32a"] * (u ** 4 - v ** 4)
+                                     + parameters["C32b"] * 2 * (u * v * u ** 2 + u * v * v ** 2)
+                                     + parameters["C34a"] * (u ** 4 - 6 * u ** 2 * v ** 2 + v ** 4)
+                                     + parameters["C34b"] * 4 * (u ** 3 * v - u * v ** 3)
+                                     )
+
+        if any([parameters[symbol] != 0. for symbol in ('C41a', 'C41b', 'C43a', 'C43b', 'C45a', 'C45b')]):
+            array = array + 1 / 5 * (parameters["C41a"] * u * (u ** 2 + v ** 2) ** 2
+                                     + parameters["C41b"] * v * (u ** 2 + v ** 2) ** 2
+                                     + parameters["C43a"] * (
+                                             4 * u ** 3 * (u ** 2 + v ** 2) - 3 * u * (u ** 2 + v ** 2) ** 2)
+                                     + parameters["C43b"] * (
+                                             -4 * v ** 3 * (u ** 2 + v ** 2) + 3 * v * (u ** 2 + v ** 2) ** 2)
+                                     + parameters["C45a"] * (u ** 5 - 10 * u ** 3 * v ** 2 + 5 * u * v ** 4)
+                                     + parameters["C45b"] * (v ** 5 - 10 * u ** 2 * v ** 3 + 5 * u ** 4 * v)
+                                     )
+
+        array *= np.float32(2 * xp.pi / self.wavelength)
+
         return array
 
     def evaluate_aberrations(self, alpha: Union[float, np.ndarray], phi: Union[float, np.ndarray]) -> \
